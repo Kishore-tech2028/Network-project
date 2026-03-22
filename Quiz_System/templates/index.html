@@ -1,0 +1,21 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Secure Quiz Portal</title>
+    <link rel="stylesheet" href="{% static 'css/quiz_style.css' %}">
+</head>
+<body>
+    <div id="quiz-container">
+        <div id="quiz-content">
+            <div class="timer-bar"><div id="timer-fill"></div></div>
+            <img id="q-image" class="question-image" src="" alt="Question Image">
+            <h2 id="question-title">Connecting to Secure Server...</h2>
+            <div id="options"></div>
+            <div id="status-msg"></div>
+        </div>
+    </div>
+    <script src="{% static 'js/quiz_logic.js' %}"></script>
+</body>
+</html>

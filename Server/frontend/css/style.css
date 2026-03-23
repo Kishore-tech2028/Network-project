@@ -1,0 +1,321 @@
+:root {
+    --bg-color: #0f172a;
+    --card-bg: rgba(30, 41, 59, 0.85);
+    --card-border: rgba(255, 255, 255, 0.1);
+    --text-main: #f8fafc;
+    --text-muted: #94a3b8;
+    
+    --primary: #6366f1;
+    --primary-hover: #818cf8;
+    
+    --success: #10b981;
+    --error: #ef4444;
+    
+    --btn-bg: rgba(51, 65, 85, 0.6);
+    --btn-border: rgba(255, 255, 255, 0.05);
+    --btn-hover: rgba(71, 85, 105, 0.8);
+    
+    --font-stack: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    font-family: var(--font-stack);
+    background: radial-gradient(circle at 50% 0%, #1e1b4b, var(--bg-color));
+    color: var(--text-main);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow-x: hidden;
+}
+
+/* Glassmorphism Cards */
+.glass-card {
+    background: var(--card-bg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--card-border);
+    border-radius: 24px;
+    padding: 2.5rem;
+    width: 90%;
+    max-width: 500px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    display: none; /* hidden by default */
+    transform: translateY(20px);
+    opacity: 0;
+    transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.4s ease;
+}
+
+.glass-card.active {
+    display: block;
+    transform: translateY(0);
+    opacity: 1;
+}
+
+/* Typography */
+h1 {
+    margin: 0 0 0.5rem 0;
+    font-size: 2.5rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #a5b4fc, #6366f1);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-align: center;
+}
+
+h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 0 0 1.5rem 0;
+    line-height: 1.4;
+    text-align: center;
+}
+
+p.subtitle {
+    text-align: center;
+    color: var(--text-muted);
+    margin-bottom: 2rem;
+}
+
+/* Inputs & Checkboxes */
+.input-group {
+    margin-bottom: 1.5rem;
+}
+
+input[type="text"] {
+    width: 100%;
+    padding: 1rem 1.2rem;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    color: var(--text-main);
+    font-size: 1rem;
+    font-family: var(--font-stack);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    box-sizing: border-box;
+}
+
+input[type="text"]:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.checkbox-group {
+    display: flex;
+    align-items: center;
+    margin-bottom: 2rem;
+    gap: 0.5rem;
+    color: var(--text-muted);
+}
+
+/* Buttons */
+button {
+    font-family: var(--font-stack);
+    cursor: pointer;
+    border: none;
+    outline: none;
+}
+
+.primary-btn {
+    width: 100%;
+    padding: 1rem;
+    border-radius: 12px;
+    background: var(--primary);
+    color: white;
+    font-weight: 600;
+    font-size: 1.1rem;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.4);
+}
+
+.primary-btn:hover {
+    background: var(--primary-hover);
+    transform: translateY(-2px);
+}
+
+.action-btn {
+    width: 100%;
+    padding: 0.8rem;
+    border-radius: 8px;
+    background: var(--success);
+    color: white;
+    font-weight: 600;
+    margin-top: 1rem;
+    transition: opacity 0.2s;
+}
+.action-btn:hover { opacity: 0.9; }
+
+/* Status Badges */
+.status-badge {
+    display: inline-block;
+    padding: 0.4rem 0.8rem;
+    border-radius: 99px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+}
+.status-badge.success {
+    background: rgba(16, 185, 129, 0.2);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.error-text {
+    color: var(--error);
+    margin-top: 1rem;
+    text-align: center;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+/* ────────────────────────────────────────────────────────── */
+/*                  Main Quiz Fixed Container                 */
+/* ────────────────────────────────────────────────────────── */
+
+.timer-bar-container {
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 99px;
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+}
+
+.timer-fill {
+    height: 100%;
+    width: 100%;
+    background: linear-gradient(90deg, #34d399, var(--primary));
+    transition: width 1s linear; /* Smooth countdown */
+}
+
+.question-meta {
+    display: flex;
+    justify-content: space-between;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.options-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    margin-bottom: 1.5rem;
+}
+
+/* The actual option buttons injected via JS */
+.option-btn {
+    width: 100%;
+    padding: 1.2rem;
+    border-radius: 12px;
+    background: var(--btn-bg);
+    border: 1px solid var(--btn-border);
+    color: var(--text-main);
+    font-size: 1.05rem;
+    font-weight: 500;
+    text-align: left;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+}
+
+.option-btn::before {
+    content: '';
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    margin-right: 12px;
+    transition: background 0.2s ease;
+}
+
+.option-btn:hover:not(:disabled) {
+    background: var(--btn-hover);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateX(4px);
+}
+
+/* States applied dynamically */
+.option-btn.selected {
+    background: rgba(99, 102, 241, 0.2);
+    border-color: var(--primary);
+}
+.option-btn.selected::before {
+    background: var(--primary);
+    box-shadow: 0 0 8px var(--primary);
+}
+
+.option-btn.correct {
+    background: rgba(16, 185, 129, 0.2) !important;
+    border-color: var(--success) !important;
+}
+.option-btn.correct::before { background: var(--success) !important; }
+
+.option-btn.wrong {
+    background: rgba(239, 68, 68, 0.2) !important;
+    border-color: var(--error) !important;
+    opacity: 0.7;
+}
+
+/* Status area */
+.status-container {
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+#status-msg {
+    margin: 0;
+    font-weight: 600;
+    color: var(--text-muted);
+    transition: color 0.3s;
+}
+
+/* Animations for text changes */
+.fade-out {
+    opacity: 0;
+    transform: scale(0.98);
+}
+.fade-in {
+    opacity: 1;
+    transform: scale(1);
+}
+.animated-content {
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+/* Overlays */
+.overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(4px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+.overlay.active {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Leaderboard */
+.leaderboard-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.8rem;
+    border-bottom: 1px solid var(--btn-border);
+}
+.leaderboard-row .score {
+    font-weight: 800;
+    color: var(--primary-hover);
+}

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Quiz Portal</title>
+    <!-- Google Fonts for premium typography -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+    <!-- Join Screen -->
+    <div id="join-screen" class="glass-card active">
+        <h1>Quiz Portal</h1>
+        <p class="subtitle">Join the Secure Real-time Quiz</p>
+        <div class="input-group">
+            <input type="text" id="username-input" placeholder="Enter your display name" maxlength="20">
+        </div>
+        <div class="checkbox-group">
+            <input type="checkbox" id="host-checkbox">
+            <label for="host-checkbox">Join as Host</label>
+        </div>
+        <button id="join-btn" class="primary-btn">Enter Quiz</button>
+        <div id="join-error" class="error-text"></div>
+    </div>
+
+    <!-- Waiting Screen -->
+    <div id="waiting-screen" class="glass-card">
+        <h2 id="welcome-msg">Welcome!</h2>
+        <div id="connection-status" class="status-badge success">Connected via secure WebSocket</div>
+        <p class="waiting-text">Waiting for the host to start the quiz...</p>
+        <p id="countdown-text" class="subtitle">Waiting for host to start...</p>
+        <div id="host-controls" style="display: none;">
+            <p>You are the host.</p>
+            <button id="start-btn" class="action-btn">Start Quiz</button>
+        </div>
+    </div>
+
+    <!-- Main Quiz Interface -->
+    <!-- Note: This structure stays FIXED in the DOM. Only inner contents change -->
+    <div id="quiz-screen" class="glass-card">
+        
+        <!-- Timer Bar Container (Fixed) -->
+        <div class="timer-bar-container">
+            <div id="timer-fill" class="timer-fill"></div>
+        </div>
+        
+        <!-- Question Meta (Fixed) -->
+        <div class="question-meta">
+            <span id="question-counter">Question --/--</span>
+            <span id="question-timer">--s</span>
+        </div>
+
+        <!-- Question Title (Changes!) -->
+        <h2 id="question-title">Loading question...</h2>
+
+        <!-- Options Container (Fixed, inner buttons change!) -->
+        <div id="options-container" class="options-grid">
+            <!-- Buttons injected here by JS -->
+        </div>
+
+        <!-- Status / Result Message (Changes!) -->
+        <div id="status-container" class="status-container">
+            <p id="status-msg">Get ready!</p>
+        </div>
+    </div>
+
+    <!-- Leaderboard / Finished Screen -->
+    <div id="finished-screen" class="glass-card">
+        <h2 id="finished-title">Quiz Finished! 🏆</h2>
+        <div id="leaderboard-container"></div>
+    </div>
+
+    <!-- Connection Lost Overlay -->
+    <div id="overlay-disconnected" class="overlay">
+        <div class="overlay-content error">
+            <h3>Connection Lost</h3>
+            <p>Trying to reconnect to secure WebSocket...</p>
+        </div>
+    </div>
+
+    <!-- WebSocket logic -->
+    <script src="js/app.js"></script>
+</body>
+</html>

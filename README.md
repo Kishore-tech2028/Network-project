@@ -1,98 +1,125 @@
 # Secure Multi-Client Quiz System
 
-A real-time quiz platform with two modes:
+A real-time quiz platform built with Python sockets, TLS, HTTPS, and WebSockets.
 
-- **Web mode**: HTTPS + WSS quiz app for browsers
-- **Socket mode**: TLS CLI server/client for terminal-based participants
+This project is currently run in **web mode** using:
 
-## Project Structure
+- `Server/web_server.py` (central HTTPS + WSS server)
+- `client/local_bridge.py` (optional client-side bridge)
 
-- `Server/` — core server logic, TLS cert files, web frontend, quiz state manager
-- `client/` — optional local bridge and browser client assets
+## 1) Introduction
 
-Main files:
+The system supports a host and multiple participants in a synchronized quiz session.
+All clients receive real-time updates for:
 
-- `Server/web_server.py` — HTTPS + WebSocket server
-- `Server/quiz_socket_server.py` — TLS socket quiz server
-- `Server/quiz_socket_client.py` — terminal client
-- `Server/session_manager.py` — shared quiz state and rules
+- lobby/participants list
+- countdown to quiz start
+- question delivery and timeout
+- answer result and leaderboard
 
-## Features
+Security is provided using TLS (HTTPS + WSS).
 
-- Multi-client real-time quiz flow
-- Host/player role handling
-- Quiz countdown and synchronized question delivery
-- Live leaderboard updates
-- TLS-secured transport
+## 2) Project Layout
 
-## Requirements
+- `Server/web_server.py` — main HTTPS/WebSocket quiz server
+- `Server/session_manager.py` — thread-safe quiz logic and state
+- `Server/client_handler.py` — shared client handling utilities
+- `Server/questions.json` — quiz question bank
+- `Server/server.crt`, `Server/server.key` — TLS certificate and key
+- `Server/frontend/` — browser UI served by the web server
+- `client/local_bridge.py` —  local bridge for client machines
+- `client/frontend/` —  client-side static assets
 
-- Python 3.10+
-- Open ports:
-  - `8443` for web mode
-  - `12345` for socket mode
-- Certificate and key in `Server/`:
+## 3) Prerequisites
+
+- Python 3.10 or newer
+- Linux/macOS/Windows terminal access
+- Port `8443` open on server machine
+- Valid TLS files in `Server/`:
   - `server.crt`
   - `server.key`
 
-## Run
+## 4) Setup
 
-### 1) Web mode (browser clients)
+From project root:
 
-From repository root:
+```bash
+cd {PATH}/CN
+```
+
+Optional: verify Python version:
+
+```bash
+python --version
+```
+
+## 5) Running the System
+
+### A. Start the central web server
+
+Run on the machine hosting the quiz:
 
 ```bash
 python Server/web_server.py
 ```
 
-Open in browser:
+By default, server binds to:
+
+- host: `0.0.0.0`
+- port: `8443`
+
+Custom host/port example:
+
+```bash
+python Server/web_server.py --host 0.0.0.0 --port 8443
+```
+
+### B. Find the server IP address
+
+On Linux server machine:
+
+```bash
+hostname -I
+```
+
+Use the LAN IP from output (example: `192.168.1.25`).
+
+### C. Connect browser clients
+
+- Same machine: `https://127.0.0.1:8443`
+- Other devices on LAN: `https://<SERVER_IP>:8443`
+  - Example: `https://192.168.1.25:8443`
+
+Browser may show a certificate warning (self-signed cert). Accept/continue for local lab use.
+
+## 6) Local Bridge Mode
+
+Use this only if each client machine should connect through a local bridge.
+
+Run bridge on client machine:
+
+```bash
+python3 local_bridge.py --quiz-host <LOCAL IP> --quiz-port <PORT> --frontend frontend 
+```
+
+Then open on that client machine:
 
 ```text
-https://<server-ip>:8443
+https://127.0.0.1:9443
 ```
 
-For local testing:
-
-```text
-https://127.0.0.1:8443
-```
-
-### 2) Socket mode (CLI clients)
-
-Start TLS socket server:
-
-```bash
-python Server/quiz_socket_server.py
-```
-
-Start host client:
-
-```bash
-python Server/quiz_socket_client.py --username HostUser --host-mode
-```
-
-Start player client:
-
-```bash
-python Server/quiz_socket_client.py --username Alice
-```
-
-Useful CLI options:
-
-- `--host` (default `127.0.0.1`)
-- `--port` (default `12345`)
-- `--ca-cert` (default `Server/server.crt`)
-
-## Protocol (high-level)
+## 7) Protocol Summary
 
 Client actions:
 
 - `join`
 - `start_quiz`
 - `submit_answer`
+- `set_ready`
+- `leave_quiz`
 - `ping`
 
-Server messages include:
+Server events:
 
 - `welcome`
 - `participants_update`
@@ -101,13 +128,26 @@ Server messages include:
 - `answer_result`
 - `question_closed`
 - `quiz_finished`
+- `start_rejected`
+- `ready_updated` / `ready_rejected`
+- `error`
 
-## Troubleshooting
+## 8) Quick Verification Checklist
 
-- If TLS connection fails, verify `Server/server.crt` and `Server/server.key` exist and match.
-- If browser warns about certificate trust, this is expected with self-signed certificates in local setups.
-- If clients cannot connect, verify host/port and firewall settings.
+- Host can join and start quiz
+- Players appear in participant list
+- Countdown is visible for all players
+- Questions arrive in sync
+- Leaderboard updates after each round
+- Disconnecting a client updates roster correctly
 
-## Notes
+## 9) Troubleshooting
 
-This repository uses low-level Python socket programming (`socket`, `ssl`, threads) for both TLS and WebSocket handling, with `SessionManager` as the central quiz state engine.
+- **Port in use**: change port with `--port`.
+- **TLS file error**: ensure `Server/server.crt` and `Server/server.key` exist and match.
+- **Client cannot connect**: verify IP address, firewall rules, and server machine reachability.
+- **WebSocket issues**: ensure clients use `https://` URL and not `http://`.
+
+## 10) Notes
+
+This project demonstrates low-level network programming with Python standard library modules (`socket`, `ssl`, `threading`, and manual WebSocket framing), while keeping quiz state centralized in `SessionManager`.

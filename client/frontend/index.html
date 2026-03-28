@@ -24,10 +24,6 @@
           maxlength="20"
         />
       </div>
-      <div class="checkbox-group">
-        <input type="checkbox" id="host-checkbox" />
-        <label for="host-checkbox">Join as Host</label>
-      </div>
       <button id="join-btn" class="primary-btn">Enter Quiz</button>
       <div id="join-error" class="error-text"></div>
     </div>
@@ -54,21 +50,6 @@
       </div>
       <p class="waiting-text">Waiting for the host to start the quiz...</p>
       <p id="countdown-text" class="subtitle">Waiting for host to start...</p>
-      <div id="host-controls" style="display: none">
-        <p>You are the host.</p>
-        <button id="start-btn" class="action-btn">Start Quiz</button>
-      </div>
-      <button
-        id="back-main-btn"
-        class="primary-btn"
-        style="display: none; margin-top: 1rem"
-      >
-        Back to Main Page
-      </button>
-      <div id="host-monitor" class="monitor-block" style="display: none">
-        <h3>Host Monitor</h3>
-        <div id="host-monitor-list" class="participants-list"></div>
-      </div>
       <div class="monitor-block">
         <h3>Connected Participants</h3>
         <div id="waiting-participants" class="participants-list"></div>

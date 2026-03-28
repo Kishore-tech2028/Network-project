@@ -5,32 +5,32 @@ Serves static frontend files over HTTPS and acts as a
 WebSocket-to-SessionManager bridge for real-time quiz logic.
 
 Usage:
-    python Simple_Server/web_server.py
+    python web_server.py
 """
 
 import base64
 import hashlib
 import json
 import logging
-import os
 import socket
 import ssl
 import struct
 import sys
 import threading
 import time
-from http.server import HTTPServer, ThreadingHTTPServer, SimpleHTTPRequestHandler
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
-# Ensure Simple_Server/ is on sys.path so local imports work
+# Ensure Server/ is on sys.path so local imports work
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from session_manager import SessionManager
+import config
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  [%(levelname)s]  %(name)s — %(message)s",
-    datefmt="%H:%M:%S",
+    level=config.LOG_LEVEL,
+    format=config.LOG_FORMAT,
+    datefmt=config.LOG_DATE_FORMAT,
 )
 logger = logging.getLogger("quiz.webserver")
 
@@ -173,25 +173,41 @@ class WebClientBridge:
 
     def _dispatch(self, action: str, msg: dict):
         if action == "join":
-            self.username = str(msg.get("username", "anonymous")).strip()[:32]
+            requested_name = str(msg.get("username", "anonymous")).strip()[:32]
+            self.username = requested_name if requested_name else "anonymous"
             is_host = bool(msg.get("host", False))
             status = self.session.add_participant(self.username, is_host)
+            state = self.session.get_state_snapshot()
             
             self.send_message({
                 "type": "welcome",
                 "username": self.username,
                 "status": status,
-                "host": self.session.host,
+                "role": "host" if state.get("host") == self.username else "player",
+                "is_host": state.get("host") == self.username,
+                "host": state.get("host"),
                 "participants": self.session.get_connected_count(),
-                "quiz_started": self.session.started,
-                "quiz_finished": self.session.finished,
-                "quiz_start_ts": self.session.quiz_start_ts,
-                "current_question": self.session.get_current_question(),
+                "participant_list": state.get("participants", []),
+                "quiz_started": state.get("quiz_started", False),
+                "quiz_finished": state.get("quiz_finished", False),
+                "quiz_start_ts": state.get("quiz_start_ts", 0.0),
+                "current_question": state.get("current_question", {}),
+                "requires_ready": bool(
+                    self.username != state.get("host")
+                    and state.get("quiz_started", False)
+                    and not state.get("quiz_finished", False)
+                    and not self.session.can_receive_questions(self.username)
+                ),
+                "ready_reason": "quiz_in_progress",
             })
+            self.server.broadcast_participants_update()
             logger.info("Player '%s' joined via Web", self.username)
         
         elif action == "submit_answer":
             if not self.username: return
+            if self.username == self.session.host:
+                self.send_message({"type": "answer_result", "accepted": False, "reason": "host_monitor_only"})
+                return
             answer = str(msg.get("answer", "")).strip()
             result = self.session.submit_answer(self.username, answer, msg.get("client_sent_ts"))
             self.send_message({"type": "answer_result", **result})
@@ -204,8 +220,40 @@ class WebClientBridge:
                     "type": "quiz_countdown", 
                     "quiz_start_ts": self.session.quiz_start_ts
                 })
+                self.server.broadcast_participants_update()
             else:
                 self.send_message({"type": "start_rejected", "message": reason})
+
+        elif action == "restart_quiz":
+            if not self.username:
+                return
+            ok, reason = self.session.restart_quiz(self.username)
+            if ok:
+                self.server._broadcast({"type": "quiz_reset"})
+                self.server._broadcast({
+                    "type": "quiz_countdown",
+                    "quiz_start_ts": self.session.quiz_start_ts,
+                })
+                self.server.broadcast_participants_update()
+            else:
+                self.send_message({"type": "restart_rejected", "message": reason})
+
+        elif action == "set_ready":
+            if not self.username:
+                return
+            ready = bool(msg.get("ready", True))
+            ok, reason = self.session.set_participant_ready(self.username, ready=ready)
+            if ok:
+                self.send_message({"type": "ready_updated", "ready": ready, "message": reason})
+                self.server.broadcast_participants_update()
+            else:
+                self.send_message({"type": "ready_rejected", "message": reason})
+
+        elif action == "leave_quiz":
+            if self.username:
+                self.session.mark_disconnected(self.username)
+            self.send_message({"type": "left_quiz"})
+            self.stop()
 
 
 # ── HTTP/WebSocket Handler ────────────────────────────────────
@@ -215,11 +263,35 @@ class QuizHTTPRequestHandler(SimpleHTTPRequestHandler):
     server: "QuizWebServer" # Type hint
 
     def __init__(self, *args, **kwargs):
-        # Serve files from Simple_Server/frontend/
+        # Serve files from frontend/
         base_dir = Path(__file__).resolve().parent / "frontend"
         if not base_dir.exists():
             base_dir.mkdir(parents=True, exist_ok=True)
         super().__init__(*args, directory=str(base_dir), **kwargs)
+
+    def handle_one_request(self):
+        """Override to log TLS connection details."""
+        try:
+            # Log successful TLS/SSL connection
+            peer_ip = self.client_address[0]
+            peer_port = self.client_address[1]
+            
+            # Check if connection is over TLS
+            try:
+                cipher = self.connection.getpeername()
+                # Try to get SSL info if available
+                if hasattr(self.connection, 'getpeercert'):
+                    logger.info("✓ TLS connection established [%s:%d] using %s", 
+                               peer_ip, peer_port, config.TLS_PROTOCOL_VERSION)
+                else:
+                    logger.debug("Client connection from [%s:%d]", peer_ip, peer_port)
+            except (AttributeError, OSError):
+                logger.debug("Client connection from [%s:%d]", peer_ip, peer_port)
+            
+            super().handle_one_request()
+        except Exception as e:
+            logger.error("Connection error from [%s:%d]: %s", 
+                        self.client_address[0], self.client_address[1], e)
 
     def do_GET(self):
         if self.path == "/ws":
@@ -246,6 +318,12 @@ class QuizHTTPRequestHandler(SimpleHTTPRequestHandler):
         self.send_header("Connection", "Upgrade")
         self.send_header("Sec-WebSocket-Accept", accept_key)
         self.end_headers()
+        self.close_connection = True
+
+        # Log WebSocket upgrade
+        peer_ip = self.client_address[0]
+        peer_port = self.client_address[1]
+        logger.info("⬆ WebSocket upgrade from [%s:%d] → /ws (RFC 6455)", peer_ip, peer_port)
 
         # Hijack connection from HTTPServer
         self.connection.setblocking(True)
@@ -274,10 +352,44 @@ class QuizWebServer(ThreadingHTTPServer):
             if client in self.clients:
                 self.clients.remove(client)
         self._broadcast({"type": "leaderboard", "rankings": self.session.get_leaderboard()})
+        self.broadcast_participants_update()
+
+    def _build_participants_update(self) -> dict:
+        state = self.session.get_state_snapshot()
+        participants = state.get("participants", [])
+        host_name = state.get("host")
+        connected_count = sum(
+            1
+            for participant in participants
+            if participant.get("connected") and participant.get("name") != host_name
+        )
+        return {
+            "type": "participants_update",
+            "host": state.get("host"),
+            "participants": participants,
+            "connected_count": connected_count,
+            "total_count": len(participants),
+            "quiz_started": state.get("quiz_started", False),
+            "quiz_finished": state.get("quiz_finished", False),
+            "quiz_start_ts": state.get("quiz_start_ts", 0.0),
+            "current_question": state.get("current_question", {}),
+        }
+
+    def broadcast_participants_update(self):
+        self._broadcast(self._build_participants_update())
 
     def _broadcast(self, msg: dict):
         with self._clients_lock:
             for client in list(self.clients):
+                client.send_message(msg)
+
+    def _broadcast_to_players(self, msg: dict):
+        with self._clients_lock:
+            for client in list(self.clients):
+                if not client.username:
+                    continue
+                if not self.session.can_receive_questions(client.username):
+                    continue
                 client.send_message(msg)
 
     def serve_forever(self, poll_interval=0.5):
@@ -311,7 +423,8 @@ class QuizWebServer(ThreadingHTTPServer):
 
             question = self.session.get_current_question()
             if question:
-                self._broadcast({"type": "question", "payload": question})
+                self._broadcast_to_players({"type": "question", "payload": question})
+                self.broadcast_participants_update()
 
             # Wait until question deadline
             sleep_time = max(0.0, self.session.question_deadline_ts - time.time())
@@ -321,7 +434,7 @@ class QuizWebServer(ThreadingHTTPServer):
                 continue
 
             correct = self.session.get_correct_answer()
-            self._broadcast({
+            self._broadcast_to_players({
                 "type": "question_closed",
                 "payload": {
                     "index": self.session.current_question_index,
@@ -329,6 +442,7 @@ class QuizWebServer(ThreadingHTTPServer):
                     "leaderboard": self.session.get_leaderboard(),
                 },
             })
+            self.broadcast_participants_update()
 
             time.sleep(self.session.TRANSITION_SECONDS)
 
@@ -338,6 +452,7 @@ class QuizWebServer(ThreadingHTTPServer):
                     "type": "quiz_finished",
                     "leaderboard": self.session.get_leaderboard(),
                 })
+                self.broadcast_participants_update()
                 logger.info("Quiz finished! Final leaderboard broadcast.")
 
 
@@ -345,12 +460,19 @@ def main():
     import argparse
     script_dir = Path(__file__).resolve().parent
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--host", default="0.0.0.0", help="Bind address")
-    parser.add_argument("--port", type=int, default=8443, help="HTTPS Port (default: 8443)")
-    parser.add_argument("--cert", default=str(script_dir / "server.crt"))
-    parser.add_argument("--key", default=str(script_dir / "server.key"))
-    parser.add_argument("--questions", default=str(script_dir / "questions.json"))
+    parser = argparse.ArgumentParser(
+        description="Quiz Server — HTTPS & WebSocket listener for real-time quiz delivery"
+    )
+    parser.add_argument("--host", default=config.DEFAULT_HOST, 
+                       help=f"Bind address (default: {config.DEFAULT_HOST})")
+    parser.add_argument("--port", type=int, default=config.DEFAULT_PORT, 
+                       help=f"HTTPS Port (default: {config.DEFAULT_PORT})")
+    parser.add_argument("--cert", default=str(script_dir / config.DEFAULT_CERT_FILE),
+                       help=f"SSL Certificate file (default: {config.DEFAULT_CERT_FILE})")
+    parser.add_argument("--key", default=str(script_dir / config.DEFAULT_KEY_FILE),
+                       help=f"SSL Key file (default: {config.DEFAULT_KEY_FILE})")
+    parser.add_argument("--questions", default=str(script_dir / config.DEFAULT_QUESTIONS_FILE),
+                       help=f"Questions JSON file (default: {config.DEFAULT_QUESTIONS_FILE})")
     args = parser.parse_args()
 
     # Init Quiz Session Manager
@@ -364,18 +486,25 @@ def main():
     context.load_cert_chain(certfile=args.cert, keyfile=args.key)
     server.socket = context.wrap_socket(server.socket, server_side=True)
 
-    logger.info("═" * 56)
-    logger.info("  Quiz Server (Web) listening on https://%s:%d", args.host, args.port)
-    logger.info("  WebSockets active on wss://%s:%d/ws", args.host, args.port)
-    logger.info("  Questions loaded: %d", len(session.questions))
-    logger.info("═" * 56)
+    # Log server startup with TLS details
+    logger.info("=" * 60)
+    logger.info("🔒 TLS/SSL Server Configuration")
+    logger.info("   Protocol:           %s", config.TLS_PROTOCOL_VERSION)
+    logger.info("   Certificate:        %s", args.cert)
+    logger.info("   Private Key:        %s", args.key)
+    logger.info("=" * 60)
+    logger.info("✓ Quiz Server (Web) listening on https://%s:%d", args.host, args.port)
+    logger.info("✓ WebSockets active on wss://%s:%d/ws", args.host, args.port)
+    logger.info("✓ Questions loaded: %d", len(session.questions))
+    logger.info("=" * 60)
 
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        pass
+        logger.info("Shutting down server...")
     finally:
         server.shutdown()
+        logger.info("Server stopped.")
 
 if __name__ == "__main__":
     main()

@@ -39,12 +39,16 @@ class ClientHandler(threading.Thread):
         client_address: tuple,
         session: SessionManager,
         on_disconnect: Callable[["ClientHandler"], None],
+        on_participants_update: Optional[Callable[[], None]] = None,
+        on_quiz_countdown: Optional[Callable[[float], None]] = None,
     ) -> None:
         super().__init__(daemon=True)
         self.sock = client_socket
         self.address = client_address
         self.session = session
         self._on_disconnect = on_disconnect
+        self._on_participants_update = on_participants_update
+        self._on_quiz_countdown = on_quiz_countdown
 
         self.username: Optional[str] = None
         self._send_lock = threading.Lock()
@@ -153,6 +157,12 @@ class ClientHandler(threading.Thread):
             self._handle_submit_answer(msg)
         elif action == "start_quiz":
             self._handle_start_quiz()
+        elif action == "restart_quiz":
+            self._handle_restart_quiz()
+        elif action == "set_ready":
+            self._handle_set_ready(msg)
+        elif action == "leave_quiz":
+            self._handle_leave_quiz()
         elif action == "ping":
             self.send_message({"type": "pong", "server_ts": time.time()})
         else:
@@ -167,18 +177,35 @@ class ClientHandler(threading.Thread):
 
         self.username = raw_name
         status = self.session.add_participant(raw_name, is_host=is_host)
+        state = self.session.get_state_snapshot()
+        is_current_user_host = state.get("host") == self.username
 
         self.send_message({
             "type": "welcome",
             "username": self.username,
             "status": status,
-            "host": self.session.host,
+            "host": state.get("host"),
+            "role": "host" if is_current_user_host else "player",
+            "is_host": is_current_user_host,
             "tls_version": self._tls_version,
             "cipher": self._cipher,
             "participants": self.session.get_connected_count(),
-            "quiz_started": self.session.started,
-            "quiz_finished": self.session.finished,
+            "participant_list": state.get("participants", []),
+            "quiz_started": state.get("quiz_started", False),
+            "quiz_finished": state.get("quiz_finished", False),
+            "quiz_start_ts": state.get("quiz_start_ts", 0.0),
+            "current_question": state.get("current_question", {}),
+            "requires_ready": bool(
+                self.username != state.get("host")
+                and state.get("quiz_started", False)
+                and not state.get("quiz_finished", False)
+                and not self.session.can_receive_questions(self.username)
+            ),
+            "ready_reason": "quiz_in_progress",
         })
+
+        if self._on_participants_update:
+            self._on_participants_update()
 
         logger.info(
             "Player '%s' %s from %s:%d  [TLS %s | %s]",
@@ -213,8 +240,50 @@ class ClientHandler(threading.Thread):
         ok, reason = self.session.start_quiz(self.username)
         if ok:
             self.send_message({"type": "quiz_started", "message": reason})
+            if self._on_quiz_countdown:
+                self._on_quiz_countdown(self.session.quiz_start_ts)
+            if self._on_participants_update:
+                self._on_participants_update()
         else:
             self.send_message({"type": "start_rejected", "message": reason})
+
+    def _handle_restart_quiz(self) -> None:
+        """Request the server to restart the quiz."""
+        if not self.username:
+            self.send_message({"type": "error", "message": "join_first"})
+            return
+
+        ok, reason = self.session.restart_quiz(self.username)
+        if ok:
+            self.send_message({"type": "quiz_reset", "message": reason})
+            if self._on_quiz_countdown:
+                self._on_quiz_countdown(self.session.quiz_start_ts)
+            if self._on_participants_update:
+                self._on_participants_update()
+        else:
+            self.send_message({"type": "restart_rejected", "message": reason})
+
+    def _handle_set_ready(self, msg: dict) -> None:
+        """Set this participant's readiness status."""
+        if not self.username:
+            self.send_message({"type": "error", "message": "join_first"})
+            return
+
+        ready = bool(msg.get("ready", True))
+        ok, reason = self.session.set_participant_ready(self.username, ready=ready)
+        if ok:
+            self.send_message({"type": "ready_updated", "ready": ready, "message": reason})
+            if self._on_participants_update:
+                self._on_participants_update()
+        else:
+            self.send_message({"type": "ready_rejected", "message": reason})
+
+    def _handle_leave_quiz(self) -> None:
+        """Mark this participant as left and close the connection."""
+        if self.username:
+            self.session.mark_disconnected(self.username)
+        self.send_message({"type": "left_quiz"})
+        self.stop()
 
     # ── Cleanup ───────────────────────────────────────────────
 

@@ -1,5 +1,4 @@
 let ws;
-let isHost = false;
 let joinedUsername = "";
 let currentHostName = "";
 let currentQuestionIndex = -1;
@@ -76,14 +75,11 @@ function handleServerMessage(msg) {
     case "participants_update":
       handleParticipantsUpdate(msg);
       break;
-    case "quiz_reset":
-      handleQuizReset();
-      break;
     case "start_rejected":
       alert(`Could not start: ${msg.message}`);
       break;
-    case "restart_rejected":
-      alert(`Could not restart: ${msg.message}`);
+    case "quiz_reset":
+      handleQuizReset();
       break;
     case "ready_rejected":
       alert(`Could not set ready: ${msg.message}`);
@@ -126,64 +122,39 @@ function handleLeftQuiz() {
   currentQuestionIndex = -1;
   showScreen("join");
   document.getElementById("join-error").textContent = "";
-  document.getElementById("countdown-text").textContent =
-    "Waiting for host to start...";
-  toggleBackToMain(false);
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.close();
   }
 }
 
-function setHostPrimaryAction(quizFinished) {
-  const startBtn = document.getElementById("start-btn");
-  if (!startBtn) return;
-  startBtn.dataset.action = quizFinished ? "restart_quiz" : "start_quiz";
-  startBtn.textContent = quizFinished ? "Restart Quiz" : "Start Quiz";
-}
-
-function toggleBackToMain(show) {
-  const backBtn = document.getElementById("back-main-btn");
-  if (!backBtn) return;
-  backBtn.style.display = show ? "block" : "none";
-}
-
 function handleWelcome(msg) {
   joinedUsername = msg.username || joinedUsername;
   currentHostName = msg.host || currentHostName;
-  const amHost = Boolean(msg.is_host || msg.role === "host");
-  isHost = amHost;
 
   document.getElementById("welcome-msg").textContent =
     `Welcome, ${msg.username}!`;
-  document.getElementById("host-controls").style.display =
-    amHost && (!msg.quiz_started || msg.quiz_finished) ? "block" : "none";
-  setHostPrimaryAction(Boolean(msg.quiz_finished));
-  toggleBackToMain(Boolean(msg.quiz_finished));
 
   updateParticipantsUI(msg.participant_list || [], msg.host || null);
 
-  if (!amHost && msg.requires_ready) {
+  if (msg.requires_ready) {
     showReadyGate(msg.ready_reason || "quiz_in_progress");
     return;
   }
 
   if (msg.quiz_finished) {
-    showScreen("waiting");
-    document.getElementById("countdown-text").textContent =
-      "Quiz completed. Host can restart or return to main page.";
+    // Late joiner who missed entire quiz!
+    showScreen("finished");
+    renderLeaderboard(msg.participant_list || []);
   } else if (msg.quiz_started) {
     if (msg.current_question && Object.keys(msg.current_question).length > 0) {
       // Mid-game joiner
-      toggleBackToMain(false);
       handleNewQuestion(msg.current_question);
     } else {
       // Joined during the 5s countdown
-      toggleBackToMain(false);
       startSyncCountdown(msg.quiz_start_ts);
     }
   } else {
     // Pre-game waiting
-    toggleBackToMain(false);
     showScreen("waiting");
   }
 }
@@ -193,8 +164,6 @@ let countdownInterval;
 function startSyncCountdown(startTs) {
   if (!startTs || startTs <= 0) return;
   showScreen("waiting");
-  toggleBackToMain(false);
-  document.getElementById("host-controls").style.display = "none";
 
   const countText = document.getElementById("countdown-text");
   const loader = document.querySelector("#waiting-screen .loader");
@@ -223,51 +192,29 @@ function handleParticipantsUpdate(msg) {
   );
   const hostName = msg.host || hostParticipant?.name || null;
   currentHostName = hostName || currentHostName;
+  updateParticipantsUI(participants, hostName);
+
   const selfParticipant = participants.find(
     (participant) => participant.name === joinedUsername,
   );
-  const amHost = Boolean(
-    selfParticipant?.is_host ||
-    (joinedUsername && hostName && joinedUsername === hostName),
-  );
-  isHost = amHost;
-
-  document.getElementById("host-controls").style.display =
-    amHost && (!msg.quiz_started || msg.quiz_finished) ? "block" : "none";
-  setHostPrimaryAction(Boolean(msg.quiz_finished));
-  toggleBackToMain(Boolean(msg.quiz_finished));
-  updateParticipantsUI(participants, hostName);
-
-  const selfReady = Boolean(selfParticipant?.ready || amHost);
-
+  const selfReady = Boolean(selfParticipant?.ready);
   const currentQuestion = msg.current_question || {};
   const hasCurrentQuestion = Object.keys(currentQuestion).length > 0;
 
-  if (!amHost && !msg.quiz_finished && msg.quiz_started && !selfReady) {
+  if (!msg.quiz_finished && msg.quiz_started && !selfReady) {
     showReadyGate(hasCurrentQuestion ? "quiz_in_progress" : "quiz_restarted");
     return;
   }
 
-  if (!msg.quiz_finished && msg.quiz_started) {
-    if (hasCurrentQuestion) {
-      if (
-        !screens.quiz.classList.contains("active") ||
-        currentQuestionIndex !== currentQuestion.index
-      ) {
-        handleNewQuestion(currentQuestion);
-      }
-    } else if (selfReady && msg.quiz_start_ts) {
-      startSyncCountdown(msg.quiz_start_ts);
-    } else if (
-      screens.waiting.classList.contains("active") &&
-      msg.quiz_start_ts
+  if (!msg.quiz_finished && msg.quiz_started && hasCurrentQuestion) {
+    if (
+      !screens.quiz.classList.contains("active") ||
+      currentQuestionIndex !== currentQuestion.index
     ) {
-      startSyncCountdown(msg.quiz_start_ts);
+      handleNewQuestion(currentQuestion);
     }
-  }
-
-  if (msg.quiz_finished) {
-    handleQuizFinished(msg.participants || []);
+  } else if (!msg.quiz_finished && msg.quiz_started && msg.quiz_start_ts) {
+    startSyncCountdown(msg.quiz_start_ts);
   }
 }
 
@@ -275,22 +222,6 @@ function updateParticipantsUI(participants, hostName) {
   renderParticipantsList("ready-participants", participants, hostName);
   renderParticipantsList("waiting-participants", participants, hostName);
   renderParticipantsList("quiz-participants", participants, hostName);
-
-  const hostMonitor = document.getElementById("host-monitor");
-  const hostMonitorList = document.getElementById("host-monitor-list");
-  const selfParticipant = participants.find(
-    (participant) => participant.name === joinedUsername,
-  );
-  const amHost = Boolean(
-    selfParticipant?.is_host ||
-    (joinedUsername && hostName && joinedUsername === hostName),
-  );
-  if (hostMonitor && hostMonitorList) {
-    hostMonitor.style.display = amHost ? "block" : "none";
-    if (amHost) {
-      renderParticipantsList("host-monitor-list", participants, hostName);
-    }
-  }
 }
 
 function renderParticipantsList(containerId, participants, hostName) {
@@ -496,24 +427,16 @@ function handleQuestionClosed(payload) {
 }
 
 function handleQuizFinished(rankings) {
-  clearInterval(timerInterval);
-  showScreen("waiting");
-  document.getElementById("countdown-text").textContent =
-    "Quiz completed. Host can restart or return to main page.";
+  showScreen("finished");
+  document.getElementById("finished-title").textContent = "Quiz Finished! 🏆";
+  renderLeaderboard(rankings);
 }
 
 function handleQuizReset() {
   clearInterval(timerInterval);
-  currentQuestionIndex = -1;
   clearInterval(countdownInterval);
-  if (!isHost) {
-    showReadyGate("quiz_restarted");
-  } else {
-    showScreen("waiting");
-    document.getElementById("countdown-text").textContent =
-      "Quiz restarting...";
-  }
-  toggleBackToMain(false);
+  currentQuestionIndex = -1;
+  showReadyGate("quiz_restarted");
 }
 
 function renderLeaderboard(rankings) {
@@ -559,7 +482,6 @@ document.getElementById("join-btn").addEventListener("click", () => {
     return;
   }
 
-  isHost = document.getElementById("host-checkbox").checked;
   manualLeave = false;
   joinedUsername = name;
 
@@ -568,7 +490,7 @@ document.getElementById("join-btn").addEventListener("click", () => {
       JSON.stringify({
         action: "join",
         username: name,
-        host: isHost,
+        host: false,
       }),
     );
   } else {
@@ -577,24 +499,8 @@ document.getElementById("join-btn").addEventListener("click", () => {
   }
 });
 
-document.getElementById("start-btn").addEventListener("click", () => {
-  const startBtn = document.getElementById("start-btn");
-  const action = startBtn.dataset.action || "start_quiz";
-  ws.send(JSON.stringify({ action }));
-});
-
-document.getElementById("back-main-btn").addEventListener("click", () => {
-  clearInterval(timerInterval);
-  currentQuestionIndex = -1;
-  showScreen("join");
-  document.getElementById("join-error").textContent = "";
-  document.getElementById("countdown-text").textContent =
-    "Waiting for host to start...";
-  toggleBackToMain(false);
-});
+// Boot WebSocket
+connect();
 
 document.getElementById("ready-btn").addEventListener("click", requestReady);
 document.getElementById("leave-btn").addEventListener("click", leaveQuiz);
-
-// Boot WebSocket
-connect();

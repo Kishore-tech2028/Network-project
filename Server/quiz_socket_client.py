@@ -164,6 +164,10 @@ class QuizClient:
             self._show_question_closed(msg.get("payload", {}))
         elif msg_type == "quiz_started":
             print("\n🚀 Quiz has started!")
+        elif msg_type == "quiz_countdown":
+            start_ts = msg.get("quiz_start_ts", 0.0)
+            remaining = max(0, int(round(start_ts - time.time())))
+            print(f"\n⏳ Quiz starts in ~{remaining}s")
         elif msg_type == "quiz_finished":
             self._show_quiz_finished(msg)
         elif msg_type == "start_rejected":

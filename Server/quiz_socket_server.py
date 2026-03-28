@@ -139,6 +139,8 @@ class QuizSocketServer:
                         client_address=client_addr,
                         session=self.session,
                         on_disconnect=self._on_client_disconnect,
+                        on_participants_update=self._broadcast_participants_update,
+                        on_quiz_countdown=self._broadcast_quiz_countdown,
                     )
                     with self._clients_lock:
                         self._clients.append(handler)
@@ -175,16 +177,53 @@ class QuizSocketServer:
                 self._clients.remove(handler)
         # Broadcast updated leaderboard
         self._broadcast({"type": "leaderboard", "rankings": self.session.get_leaderboard()})
+        self._broadcast_participants_update()
         logger.info(
             "Active connections: %d  |  Players: %d",
             len(self._clients),
             self.session.get_connected_count(),
         )
 
+    def _broadcast_participants_update(self) -> None:
+        """Broadcast current participants and quiz state to all clients."""
+        state = self.session.get_state_snapshot()
+        participants = state.get("participants", [])
+        host_name = state.get("host")
+        connected_count = sum(
+            1
+            for participant in participants
+            if participant.get("connected") and participant.get("name") != host_name
+        )
+        self._broadcast({
+            "type": "participants_update",
+            "host": state.get("host"),
+            "participants": participants,
+            "connected_count": connected_count,
+            "total_count": len(participants),
+            "quiz_started": state.get("quiz_started", False),
+            "quiz_finished": state.get("quiz_finished", False),
+            "quiz_start_ts": state.get("quiz_start_ts", 0.0),
+            "current_question": state.get("current_question", {}),
+        })
+
+    def _broadcast_quiz_countdown(self, quiz_start_ts: float) -> None:
+        """Broadcast quiz start countdown timestamp to all clients."""
+        self._broadcast({"type": "quiz_countdown", "quiz_start_ts": quiz_start_ts})
+
     def _broadcast(self, msg: dict) -> None:
         """Send a message to all connected clients."""
         with self._clients_lock:
             for handler in list(self._clients):
+                handler.send_message(msg)
+
+    def _broadcast_to_ready_players(self, msg: dict) -> None:
+        """Send a message to ready non-host players only."""
+        with self._clients_lock:
+            for handler in list(self._clients):
+                if not handler.username:
+                    continue
+                if not self.session.can_receive_questions(handler.username):
+                    continue
                 handler.send_message(msg)
 
     # ── Round timer (quiz progression) ────────────────────────
@@ -203,23 +242,33 @@ class QuizSocketServer:
         """Timer thread: waits for deadline, reveals answer, advances."""
         while self._running:
             if self.session.finished or not self.session.started:
-                return
+                time.sleep(0.5)
+                continue
+
+            # Countdown phase: wait until the scheduled quiz start, then open Q1.
+            if self.session.current_question_index == -1:
+                sleep_time = max(0.0, self.session.quiz_start_ts - time.time())
+                time.sleep(sleep_time)
+                if not self.session.finished and self.session.started:
+                    self.session.advance_to_next_question()
+                continue
 
             # Send current question to all clients
             question = self.session.get_current_question()
             if question:
-                self._broadcast({"type": "question", "payload": question})
+                self._broadcast_to_ready_players({"type": "question", "payload": question})
+                self._broadcast_participants_update()
 
             # Wait until question deadline
             sleep_time = max(0.0, self.session.question_deadline_ts - time.time())
             time.sleep(sleep_time)
 
             if self.session.finished or not self.session.started:
-                return
+                continue
 
             # Reveal correct answer
             correct = self.session.get_correct_answer()
-            self._broadcast({
+            self._broadcast_to_ready_players({
                 "type": "question_closed",
                 "payload": {
                     "index": self.session.current_question_index,
@@ -227,6 +276,7 @@ class QuizSocketServer:
                     "leaderboard": self.session.get_leaderboard(),
                 },
             })
+            self._broadcast_participants_update()
 
             # Transition pause
             time.sleep(self.session.TRANSITION_SECONDS)
@@ -238,8 +288,9 @@ class QuizSocketServer:
                     "type": "quiz_finished",
                     "leaderboard": self.session.get_leaderboard(),
                 })
+                self._broadcast_participants_update()
                 logger.info("Quiz finished! Final leaderboard broadcast.")
-                return
+                continue
 
     # ── Polling thread for quiz start ─────────────────────────
 

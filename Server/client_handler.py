@@ -281,7 +281,10 @@ class ClientHandler(threading.Thread):
     def _handle_leave_quiz(self) -> None:
         """Mark this participant as left and close the connection."""
         if self.username:
-            self.session.mark_disconnected(self.username)
+            if self.username == self.session.host:
+                self.send_message({"type": "ready_rejected", "message": "host_cannot_leave"})
+                return
+            self.session.remove_participant(self.username)
         self.send_message({"type": "left_quiz"})
         self.stop()
 

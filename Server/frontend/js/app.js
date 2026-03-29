@@ -2,6 +2,7 @@ let ws;
 let isHost = false;
 let joinedUsername = "";
 let currentHostName = "";
+let latestParticipants = [];
 let currentQuestionIndex = -1;
 let questionDuration = 10;
 let timerInterval;
@@ -150,6 +151,9 @@ function toggleBackToMain(show) {
 function handleWelcome(msg) {
   joinedUsername = msg.username || joinedUsername;
   currentHostName = msg.host || currentHostName;
+  latestParticipants = Array.isArray(msg.participant_list)
+    ? msg.participant_list
+    : latestParticipants;
   const amHost = Boolean(msg.is_host || msg.role === "host");
   isHost = amHost;
 
@@ -159,6 +163,7 @@ function handleWelcome(msg) {
     amHost && (!msg.quiz_started || msg.quiz_finished) ? "block" : "none";
   setHostPrimaryAction(Boolean(msg.quiz_finished));
   toggleBackToMain(Boolean(msg.quiz_finished));
+  setParticipantsVisibility(amHost || !msg.quiz_started || msg.quiz_finished);
 
   updateParticipantsUI(msg.participant_list || [], msg.host || null);
 
@@ -218,6 +223,7 @@ function startSyncCountdown(startTs) {
 
 function handleParticipantsUpdate(msg) {
   const participants = Array.isArray(msg.participants) ? msg.participants : [];
+  latestParticipants = participants;
   const hostParticipant = participants.find(
     (participant) => participant.is_host,
   );
@@ -236,6 +242,7 @@ function handleParticipantsUpdate(msg) {
     amHost && (!msg.quiz_started || msg.quiz_finished) ? "block" : "none";
   setHostPrimaryAction(Boolean(msg.quiz_finished));
   toggleBackToMain(Boolean(msg.quiz_finished));
+  setParticipantsVisibility(amHost || !msg.quiz_started || msg.quiz_finished);
   updateParticipantsUI(participants, hostName);
 
   const selfReady = Boolean(selfParticipant?.ready || amHost);
@@ -271,26 +278,23 @@ function handleParticipantsUpdate(msg) {
   }
 }
 
+function setParticipantsVisibility(canView) {
+  ["ready-participants", "waiting-participants", "quiz-participants"].forEach(
+    (containerId) => {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      const block = container.closest(".monitor-block");
+      if (block) {
+        block.style.display = canView ? "block" : "none";
+      }
+    },
+  );
+}
+
 function updateParticipantsUI(participants, hostName) {
   renderParticipantsList("ready-participants", participants, hostName);
   renderParticipantsList("waiting-participants", participants, hostName);
   renderParticipantsList("quiz-participants", participants, hostName);
-
-  const hostMonitor = document.getElementById("host-monitor");
-  const hostMonitorList = document.getElementById("host-monitor-list");
-  const selfParticipant = participants.find(
-    (participant) => participant.name === joinedUsername,
-  );
-  const amHost = Boolean(
-    selfParticipant?.is_host ||
-    (joinedUsername && hostName && joinedUsername === hostName),
-  );
-  if (hostMonitor && hostMonitorList) {
-    hostMonitor.style.display = amHost ? "block" : "none";
-    if (amHost) {
-      renderParticipantsList("host-monitor-list", participants, hostName);
-    }
-  }
 }
 
 function renderParticipantsList(containerId, participants, hostName) {
@@ -331,6 +335,8 @@ function renderParticipantsList(containerId, participants, hostName) {
 
 function handleNewQuestion(payload) {
   showScreen("quiz");
+  updateParticipantsUI(latestParticipants, currentHostName || null);
+  setParticipantsVisibility(isHost);
   currentQuestionIndex = payload.index;
   questionDuration = payload.duration;
 

@@ -182,6 +182,16 @@ class SessionManager:
             if self.host == name:
                 self.host = None
 
+    def remove_participant(self, name: str) -> bool:
+        """Permanently remove a participant from the roster."""
+        with self._lock:
+            if name not in self.participants:
+                return False
+            del self.participants[name]
+            if self.host == name:
+                self.host = None
+            return True
+
     def get_connected_count(self) -> int:
         """Number of currently connected participants."""
         with self._lock:

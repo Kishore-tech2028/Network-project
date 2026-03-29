@@ -251,7 +251,10 @@ class WebClientBridge:
 
         elif action == "leave_quiz":
             if self.username:
-                self.session.mark_disconnected(self.username)
+                if self.username == self.session.host:
+                    self.send_message({"type": "ready_rejected", "message": "host_cannot_leave"})
+                    return
+                self.session.remove_participant(self.username)
             self.send_message({"type": "left_quiz"})
             self.stop()
 

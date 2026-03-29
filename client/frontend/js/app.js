@@ -1,6 +1,8 @@
 let ws;
+let isHost = false;
 let joinedUsername = "";
 let currentHostName = "";
+let latestParticipants = [];
 let currentQuestionIndex = -1;
 let questionDuration = 10;
 let timerInterval;
@@ -130,10 +132,15 @@ function handleLeftQuiz() {
 function handleWelcome(msg) {
   joinedUsername = msg.username || joinedUsername;
   currentHostName = msg.host || currentHostName;
+  latestParticipants = Array.isArray(msg.participant_list)
+    ? msg.participant_list
+    : latestParticipants;
+  isHost = Boolean(msg.is_host || msg.role === "host");
 
   document.getElementById("welcome-msg").textContent =
     `Welcome, ${msg.username}!`;
 
+  setParticipantsVisibility(isHost || !msg.quiz_started || msg.quiz_finished);
   updateParticipantsUI(msg.participant_list || [], msg.host || null);
 
   if (msg.requires_ready) {
@@ -187,16 +194,22 @@ function startSyncCountdown(startTs) {
 
 function handleParticipantsUpdate(msg) {
   const participants = Array.isArray(msg.participants) ? msg.participants : [];
+  latestParticipants = participants;
   const hostParticipant = participants.find(
     (participant) => participant.is_host,
   );
   const hostName = msg.host || hostParticipant?.name || null;
   currentHostName = hostName || currentHostName;
-  updateParticipantsUI(participants, hostName);
-
   const selfParticipant = participants.find(
     (participant) => participant.name === joinedUsername,
   );
+  isHost = Boolean(
+    selfParticipant?.is_host ||
+    (joinedUsername && hostName && joinedUsername === hostName),
+  );
+  setParticipantsVisibility(isHost || !msg.quiz_started || msg.quiz_finished);
+  updateParticipantsUI(participants, hostName);
+
   const selfReady = Boolean(selfParticipant?.ready);
   const currentQuestion = msg.current_question || {};
   const hasCurrentQuestion = Object.keys(currentQuestion).length > 0;
@@ -216,6 +229,19 @@ function handleParticipantsUpdate(msg) {
   } else if (!msg.quiz_finished && msg.quiz_started && msg.quiz_start_ts) {
     startSyncCountdown(msg.quiz_start_ts);
   }
+}
+
+function setParticipantsVisibility(canView) {
+  ["ready-participants", "waiting-participants", "quiz-participants"].forEach(
+    (containerId) => {
+      const container = document.getElementById(containerId);
+      if (!container) return;
+      const block = container.closest(".monitor-block");
+      if (block) {
+        block.style.display = canView ? "block" : "none";
+      }
+    },
+  );
 }
 
 function updateParticipantsUI(participants, hostName) {
@@ -262,6 +288,8 @@ function renderParticipantsList(containerId, participants, hostName) {
 
 function handleNewQuestion(payload) {
   showScreen("quiz");
+  updateParticipantsUI(latestParticipants, currentHostName || null);
+  setParticipantsVisibility(isHost);
   currentQuestionIndex = payload.index;
   questionDuration = payload.duration;
 

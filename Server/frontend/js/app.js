@@ -307,27 +307,38 @@ function renderParticipantsList(containerId, participants, hostName) {
     return;
   }
 
-  const sorted = [...participants].sort(
-    (a, b) =>
+  const isHostParticipant = (participant) =>
+    Boolean(participant.is_host || participant.name === hostName);
+
+  const sorted = [...participants].sort((a, b) => {
+    const aIsHost = isHostParticipant(a);
+    const bIsHost = isHostParticipant(b);
+
+    if (aIsHost && !bIsHost) return -1;
+    if (!aIsHost && bIsHost) return 1;
+
+    return (
       Number(b.score || 0) - Number(a.score || 0) ||
-      String(a.name).localeCompare(String(b.name)),
-  );
+      String(a.name).localeCompare(String(b.name))
+    );
+  });
   sorted.forEach((p) => {
     const row = document.createElement("div");
     row.className = "participant-row";
 
-    const hostBadge = p.is_host || p.name === hostName ? " 👑" : "";
+    const hostParticipant = isHostParticipant(p);
+    const hostBadge = hostParticipant ? " 👑" : "";
     const state = p.connected ? "🟢" : "🔴";
-    const readyBadge =
-      p.is_host || p.name === hostName
-        ? " • Host"
-        : p.ready
-          ? " • ✅ Ready"
-          : " • ⏳ Not Ready";
+    const readyBadge = hostParticipant
+      ? " • Host"
+      : p.ready
+        ? " • ✅ Ready"
+        : " • ⏳ Not Ready";
+    const scoreText = hostParticipant ? "" : String(p.score ?? 0);
 
     row.innerHTML = `
             <span class="left">${state} ${p.name}${hostBadge}${readyBadge}</span>
-            <span class="score">${p.score ?? 0}</span>
+            <span class="score">${scoreText}</span>
         `;
     container.appendChild(row);
   });
@@ -604,3 +615,22 @@ document.getElementById("leave-btn").addEventListener("click", leaveQuiz);
 
 // Boot WebSocket
 connect();
+
+function isHostPlayer(player, hostId) {
+  return Boolean(
+    player?.isHost ||
+    player?.is_host ||
+    player?.role === "host" ||
+    (hostId != null && player?.id === hostId),
+  );
+}
+
+function sortHostFirst(players, hostId) {
+  return [...players].sort((a, b) => {
+    const aHost = isHostPlayer(a, hostId);
+    const bHost = isHostPlayer(b, hostId);
+    if (aHost && !bHost) return -1;
+    if (!aHost && bHost) return 1;
+    return 0;
+  });
+}

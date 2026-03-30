@@ -44,7 +44,7 @@ Security is provided using TLS (HTTPS + WSS).
 From project root:
 
 ```bash
-cd {PATH}/CN
+cd Network-Project
 ```
 
 Optional: verify Python version:

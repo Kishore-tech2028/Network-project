@@ -23,7 +23,6 @@ class Participant:
     name: str
     score: int = 0
     connected: bool = True
-    ready: bool = False
     latency_ewma_ms: float = 120.0          # exponentially weighted moving avg
     answers_by_question: Dict[int, str] = field(default_factory=dict)
     last_answer_latency_ms: float = 0.0
@@ -92,47 +91,14 @@ class SessionManager:
             existing = self.participants.get(name)
             if existing:
                 existing.connected = True
-                if not is_host and not self.started:
-                    existing.ready = True
                 status = "reconnected"
             else:
-                self.participants[name] = Participant(
-                    name=name,
-                    ready=(not self.started),
-                )
+                self.participants[name] = Participant(name=name)
                 status = "joined"
 
-            current_host = self.participants.get(self.host) if self.host else None
-            host_disconnected = bool(current_host and not current_host.connected)
-            if is_host and (self.host is None or self.host == name or host_disconnected):
+            if is_host and (self.host is None or self.host == name):
                 self.host = name
-                host_participant = self.participants.get(name)
-                if host_participant:
-                    host_participant.ready = True
             return status
-
-    def set_participant_ready(self, name: str, ready: bool = True) -> Tuple[bool, str]:
-        """Set readiness for a participant (host is always ready)."""
-        with self._lock:
-            participant = self.participants.get(name)
-            if not participant:
-                return False, "unknown_participant"
-            if self.host and name == self.host:
-                participant.ready = True
-                return True, "host_always_ready"
-
-            participant.ready = bool(ready)
-            return True, "ready_set" if participant.ready else "ready_cleared"
-
-    def can_receive_questions(self, name: str) -> bool:
-        """Whether this participant should receive live question payloads."""
-        with self._lock:
-            participant = self.participants.get(name)
-            if not participant or not participant.connected:
-                return False
-            if self.host and name == self.host:
-                return False
-            return bool(participant.ready)
 
     def get_participants_snapshot(self) -> List[dict]:
         """Thread-safe participant roster for lobby/monitoring UIs."""
@@ -145,7 +111,6 @@ class SessionManager:
                 {
                     "name": p.name,
                     "connected": p.connected,
-                    "ready": p.ready,
                     "score": p.score,
                     "is_host": p.name == self.host,
                 }
@@ -165,7 +130,6 @@ class SessionManager:
                     {
                         "name": p.name,
                         "connected": p.connected,
-                        "ready": p.ready,
                         "score": p.score,
                         "is_host": p.name == self.host,
                     }
@@ -179,27 +143,11 @@ class SessionManager:
             p = self.participants.get(name)
             if p:
                 p.connected = False
-            if self.host == name:
-                self.host = None
-
-    def remove_participant(self, name: str) -> bool:
-        """Permanently remove a participant from the roster."""
-        with self._lock:
-            if name not in self.participants:
-                return False
-            del self.participants[name]
-            if self.host == name:
-                self.host = None
-            return True
 
     def get_connected_count(self) -> int:
         """Number of currently connected participants."""
         with self._lock:
-            return sum(
-                1
-                for name, participant in self.participants.items()
-                if participant.connected and name != self.host
-            )
+            return sum(1 for p in self.participants.values() if p.connected)
 
     # ── Quiz control ──────────────────────────────────────────
 
@@ -219,28 +167,6 @@ class SessionManager:
             self.current_question_index = -1
             self.quiz_start_ts = time.time() + delay_seconds
             return True, "quiz_starting_soon"
-
-    def restart_quiz(self, by_user: str, delay_seconds: float = 5.0) -> Tuple[bool, str]:
-        """Reset scores/state and schedule a fresh quiz countdown."""
-        with self._lock:
-            if self.host and by_user != self.host:
-                return False, "only_host_can_restart"
-            if not self.questions:
-                return False, "no_questions"
-
-            for participant in self.participants.values():
-                participant.score = 0
-                participant.answers_by_question.clear()
-                participant.last_answer_latency_ms = 0.0
-                participant.ready = participant.name == self.host
-
-            self.started = True
-            self.finished = False
-            self.current_question_index = -1
-            self.quiz_start_ts = time.time() + delay_seconds
-            self.question_start_ts = 0.0
-            self.question_deadline_ts = 0.0
-            return True, "quiz_restarting_soon"
 
     def _open_current_question(self) -> None:
         """Set the start and deadline timestamps for the current round."""
@@ -311,10 +237,6 @@ class SessionManager:
             participant = self.participants.get(user)
             if not participant:
                 return {"accepted": False, "reason": "unknown_participant"}
-            if self.host and user == self.host:
-                return {"accepted": False, "reason": "host_monitor_only"}
-            if not participant.ready:
-                return {"accepted": False, "reason": "player_not_ready"}
 
             q_idx = self.current_question_index
             if q_idx in participant.answers_by_question:
@@ -361,13 +283,8 @@ class SessionManager:
 
     def _leaderboard_unlocked(self) -> List[dict]:
         """Build the leaderboard (no lock)."""
-        players = [
-            participant
-            for participant in self.participants.values()
-            if participant.name != self.host
-        ]
         ranked = sorted(
-            players,
+            self.participants.values(),
             key=lambda p: (-p.score, p.latency_ewma_ms, p.name.lower()),
         )
         return [
